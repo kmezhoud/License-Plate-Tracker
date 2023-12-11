@@ -8,9 +8,40 @@ import pytesseract
 import pyocr
 import concurrent.futures
 from pyocr.builders import TextBuilder
+import os.path
 
-import time
 
+# Function to extract datetime from the upper right region
+def extract_datetime(frame):
+    
+    # Crop the region at the upper right (adjust coordinates based on your video)
+    x, y, w, h = 770, 33, 300, 40  # Example coordinates (adjust based on your video)
+    crop_region = frame[y:y + h, x:x + w]
+
+    # Draw a square around the cropped region
+    cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 0), 2)
+    
+    # Display the coordinates of the cropped region
+    coordinates_text = f"Coordinates: ({x}, {y}), Width: {w}, Height: {h}"
+    cv2.putText(frame, coordinates_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
+                 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    
+    
+
+    # Convert the cropped region to RGB (EasyOCR expects RGB format)
+    crop_rgb = cv2.cvtColor(crop_region, cv2.COLOR_BGR2RGB)
+    
+    # Initialize EasyOCR reader for English and Arabic languages
+    reader = easyocr.Reader(['en'], gpu=False, verbose=False) #, 'ar'
+    
+    # Use EasyOCR to extract text from the cropped region
+    results = reader.readtext(crop_rgb)
+    
+    # Extract text from the result (assuming the first result is the most relevant)
+    datetime_text = results[0][1] if results else ""
+
+    return datetime_text.strip()
+  
 
 def process_frame(frame, ocr_type, recorded_license_plate):
   
@@ -125,7 +156,7 @@ def process_frame(frame, ocr_type, recorded_license_plate):
 
         # Find and replace Arabic characters using a more flexible pattern
         # Remove non-alphanumeric characters  تونس
-        txt = re.sub(r"[^\d]", " ", txt) 
+        txt = re.sub(r"[^\d]", "_", txt) 
         
         # if 'تونس' in txt:
         #     # If 'تونس' is already present, leave the text unchanged
@@ -140,13 +171,27 @@ def process_frame(frame, ocr_type, recorded_license_plate):
                    break
                 else:
                   print(f"Detected license plate '{txt}' is not recorded. (Confidence: {confidence:.2f}%)")
+                  
+                  # Extract datetime from the current frame
+                  datetime_info = extract_datetime(frame)
+                  
+                  # Update the dictionary of recorded license plates
+                  recorded_license_plates[txt]= datetime_info
+                  
                   # Update the list of recorded license plates
-                  recorded_license_plates.append(txt)
-                  print(f"LIST: '{recorded_license_plates}'")
+                  #recorded_license_plates.append(txt)
+            
+                  print(f"DICT: '{recorded_license_plates}'")
+                  
+
+                  # Display the datetime information (you may want to further process or use this information)
+                  #print(f"Datetime: {datetime_info}")
+                  
+                  ## Write license to file
+                  with open(os.path.splitext(os.path.basename(video_path))[0]+'_licenses.txt',"a") as f: 
+                       print(txt+" "+datetime_info, file=f) 
             else:
                 print(f"Detected license plate '{txt}' is not valid.")
-
-        
         
         # text to display    
         text_to_display = f"{txt} (Confidence: {confidence:.2f}%)"
@@ -162,8 +207,8 @@ def process_frame(frame, ocr_type, recorded_license_plate):
 
 # List of regex patterns for license plate formats
 license_plate_patterns = [
-    r'\s*\d{1,3}\s+\d{1,4}\s*',        # Tunisian format  r'\d{1,3}\sتونس\s\d{1,4}'
-    r'\s*\d{5,6}\s+[آ-ي]{2}\s*',             # Alternative format
+    r'_*\d{1,3}_+\d{1,4}_*',        # Tunisian format  r'\d{1,3}\sتونس\s\d{1,4}'
+    r'_*\d{5,6}_+[آ-ي]{2}_*',       # Alternative format
     # Add more patterns as needed
 ]
 
@@ -177,15 +222,14 @@ def is_license_plate_recorded(plate, recorded_license_plates):
     return plate in recorded_license_plates
   
   
-def skip_frames(cap, seconds_to_skip):
-    start_time = time.time()
-    elapsed_time = 0
-
-    while elapsed_time < seconds_to_skip:
-        ret, _ = cap.read()
-        if not ret:
-            break
-        elapsed_time = time.time() - start_time
+# def skip_frames(cap, seconds_to_skip):
+#     start_time = time.time()
+# 
+#     while elapsed_time < seconds_to_skip:
+#         ret, _ = cap.read()
+#         if not ret:
+#             break
+#         elapsed_time = time.time() - start_time
         
 
 def process_video(video_path, ocr_type, tracker):
@@ -193,6 +237,11 @@ def process_video(video_path, ocr_type, tracker):
     #tracker = cv2.TrackerMIL_create()
     frame_count = 0
     recorded_license_plate = ""
+    
+    # Creates a new file
+    with open(os.path.splitext(os.path.basename(video_path))[0]+'_licenses.txt', 'w') as f:
+        print("License  Datetime", file=f)
+        pass
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
       
@@ -229,7 +278,7 @@ def process_video(video_path, ocr_type, tracker):
 if __name__ == "__main__":
     video_path = "../video/2169_16_R_20231117070921_motion.avi"
     ocr_type = 'easyocr'  # 'tesseract', 'easyocr', 'pyocr'
-    recorded_license_plates=[]
+    recorded_license_plates={}
     # Initialize object tracker (using MIL tracker)
     tracker = cv2.TrackerMIL_create()
     process_video(video_path, ocr_type, tracker)
