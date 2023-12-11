@@ -11,6 +11,7 @@ from pyocr.builders import TextBuilder
 
 import time
 
+
 def process_frame(frame, ocr_type, recorded_license_plate):
   
     # Initialize variables
@@ -30,14 +31,14 @@ def process_frame(frame, ocr_type, recorded_license_plate):
         tesseract_path = '/usr/bin/tesseract'
         pytesseract.pytesseract.tesseract_cmd = tesseract_path
     elif ocr_type == 'easyocr':
-        reader = easyocr.Reader(['en', 'ar'], gpu=True)  # Specify languages as needed
+        reader = easyocr.Reader(['en'], gpu=False, verbose=False)  # Specify languages as needed ,'ar'
     elif ocr_type == 'pyocr':
         # Initialize PyOCR
         tools = pyocr.get_available_tools()
         tool = tools[0]  # Use the first available OCR tool
     else:
         raise ValueError("Invalid OCR type. Choose 'tesseract', 'easyocr', or 'pyocr'.")
-
+ 
     height, width, _ = frame.shape
 
     # Convert BGR to RGB
@@ -112,17 +113,7 @@ def process_frame(frame, ocr_type, recorded_license_plate):
             txt = results[0][1] if results else ""
             confidence = confidences[i] * 100  # Confidence in percentage
         elif ocr_type == 'pyocr':
-            # Create an ImageTostringBuilder with custom configuration
-           # custom_config = {
-               # 'oem': 3,             # Set OCR Engine Mode to 3 (default)
-                #'psm': 6,             # Set page segmentation mode to 6 (single block of text)
-                #'outputbase': 'digits',  # Output recognition results in digits only
-            #    lang='ara+eng',    # Specify languages for OCR (Arabic and English)
-             #   'tessedit_char_whitelist': '0123456789تونس'  # Set whitelist of characters to recognize
-           # }
-           # builder = pyocr.builders.TextBuilder(**custom_config)
-            # Use the custom configuration with the builder
-            
+            # pyOCR
             txt = tool.image_to_string(
                 Image.fromarray(cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)),
                 lang="ara+eng",
@@ -133,28 +124,30 @@ def process_frame(frame, ocr_type, recorded_license_plate):
             raise ValueError("Invalid OCR type. Choose 'tesseract', 'easyocr', or 'pyocr'.")
 
         # Find and replace Arabic characters using a more flexible pattern
-        #txt = re.sub(r'[^\w\s\d]', ' ', txt)  # Remove non-alphanumeric characters  تونس
-        if 'تونس' in txt:
-            # If 'تونس' is already present, leave the text unchanged
-            #txt = re.sub(r'[^\w\s]', 'تونس', txt) 
-            print("tunis is in text")
-            #pass
-        elif confidence > 99.5:
-            # Replace any sequence of characters with 'تونس'
-            #txt+='تونس'
-            print(f"{txt} (Confidence: {confidence:.2f}%)")
-            #pass
-            
-         # Skip frame if the license plate is similar to the previous one
-        for recorded_plate in recorded_license_plates:
-            if are_license_plates_similar(txt, recorded_plate):
-                print(f"Skipping frame: License plate is similar to recorded plate '{recorded_plate}'.")
-                return frame, recorded_license_plates
-                break
-              
-         # Update the list of recorded license plates
-        recorded_license_plates.append(txt)
-    
+        # Remove non-alphanumeric characters  تونس
+        txt = re.sub(r"[^\d]", " ", txt) 
+        
+        # if 'تونس' in txt:
+        #     # If 'تونس' is already present, leave the text unchanged
+        #     #txt = re.sub(r'[^\w\s]', 'تونس', txt) 
+        #     print("tunis is in text")
+        #     #pass
+        if confidence > 99.5:
+            if is_valid_license_plate(txt):
+                print(f"Detected license plate '{txt}' is valid.")
+                if is_license_plate_recorded(txt, recorded_license_plates):
+                    #print(f"Detected license plate '{txt}' ")
+                   break
+                else:
+                  print(f"Detected license plate '{txt}' is not recorded. (Confidence: {confidence:.2f}%)")
+                  # Update the list of recorded license plates
+                  recorded_license_plates.append(txt)
+                  print(f"LIST: '{recorded_license_plates}'")
+            else:
+                print(f"Detected license plate '{txt}' is not valid.")
+
+        
+        
         # text to display    
         text_to_display = f"{txt} (Confidence: {confidence:.2f}%)"
        # Draw a filled black rectangle for the text background
@@ -167,27 +160,23 @@ def process_frame(frame, ocr_type, recorded_license_plate):
     return frame, recorded_license_plate
 
 
-# def are_license_plates_similar(plate1, plate2, threshold=0.9):
-#     # You can use your own similarity comparison logic here
-#     # For example, you might want to use a text similarity metric like Levenshtein distance
-#     # For simplicity, this example uses a basic character-wise comparison
-# 
-#     # Convert both license plates to lowercase for case-insensitive comparison
-#     plate1_lower = plate1.lower()
-#     plate2_lower = plate2.lower()
-# 
-#     # Calculate the similarity ratio
-#     similarity_ratio = sum(a == b for a, b in zip(plate1_lower, plate2_lower)) / max(len(plate1_lower), len(plate2_lower))
-# 
-#     # Return True if the similarity ratio is above the threshold, indicating similarity
-#     return similarity_ratio > threshold
-  
-  
-def are_license_plates_similar(plate1, plate2):
-    # Implement your logic for comparing license plates
-    # This can be as simple as a string comparison or more complex logic
-    return plate1 == plate2  
+# List of regex patterns for license plate formats
+license_plate_patterns = [
+    r'\s*\d{1,3}\s+\d{1,4}\s*',        # Tunisian format  r'\d{1,3}\sتونس\s\d{1,4}'
+    r'\s*\d{5,6}\s+[آ-ي]{2}\s*',             # Alternative format
+    # Add more patterns as needed
+]
 
+def is_valid_license_plate(plate):
+   # Check if the license plate matches any pattern from the list
+    return any(re.fullmatch(pattern, plate) for pattern in license_plate_patterns)
+  
+
+
+def is_license_plate_recorded(plate, recorded_license_plates):
+    return plate in recorded_license_plates
+  
+  
 def skip_frames(cap, seconds_to_skip):
     start_time = time.time()
     elapsed_time = 0
@@ -203,7 +192,7 @@ def process_video(video_path, ocr_type, tracker):
     cap = cv2.VideoCapture(video_path)
     #tracker = cv2.TrackerMIL_create()
     frame_count = 0
-    prev_license_plate = ""
+    recorded_license_plate = ""
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
       
@@ -213,12 +202,6 @@ def process_video(video_path, ocr_type, tracker):
                 break
 
             frame_count += 1
-            
-            # Skip frames every 10 seconds
-            #if frame_count % 2 == 0:  # Assuming 30 frames per second, 10 seconds = 300 frames
-            #    print("skip_frame:", frame_count)
-            #    skip_frames(cap, 10)
-            #    frame_count = 0
 
             # Skip frames to speed up processing
             if frame_count % 50 != 0:
@@ -227,12 +210,12 @@ def process_video(video_path, ocr_type, tracker):
 
             # Resize the frame to reduce processing time
             #frame = cv2.resize(frame, (1200, 1000))
-
+            
             # Submit the frame to the executor for parallel processing
-            future = executor.submit(process_frame, frame, ocr_type, prev_license_plate)
+            future = executor.submit(process_frame, frame, ocr_type, recorded_license_plate)
 
             # Wait for the result and retrieve the processed frame and updated license plate
-            processed_frame, prev_license_plate = future.result()
+            processed_frame, recorded_license_plate = future.result()
 
             cv2.imshow("Frame", processed_frame)
 
