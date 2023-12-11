@@ -110,17 +110,6 @@ def process_frame(frame, ocr_type):
             txt = results[0][1] if results else ""
             confidence = confidences[i] * 100  # Confidence in percentage
         elif ocr_type == 'pyocr':
-            # Create an ImageTostringBuilder with custom configuration
-           # custom_config = {
-               # 'oem': 3,             # Set OCR Engine Mode to 3 (default)
-                #'psm': 6,             # Set page segmentation mode to 6 (single block of text)
-                #'outputbase': 'digits',  # Output recognition results in digits only
-            #    lang='ara+eng',    # Specify languages for OCR (Arabic and English)
-             #   'tessedit_char_whitelist': '0123456789تونس'  # Set whitelist of characters to recognize
-           # }
-           # builder = pyocr.builders.TextBuilder(**custom_config)
-            # Use the custom configuration with the builder
-            
             txt = tool.image_to_string(
                 Image.fromarray(cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)),
                 lang="ara+eng",
