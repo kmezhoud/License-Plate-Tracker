@@ -9,7 +9,8 @@ import pyocr
 import concurrent.futures
 from pyocr.builders import TextBuilder
 import os.path
-
+import time
+from datetime import datetime as dt
 
 # Function to extract datetime from the upper right region
 def extract_datetime(frame):
@@ -23,9 +24,9 @@ def extract_datetime(frame):
     
     # Display the coordinates of the cropped region
     coordinates_text = f"Coordinates: ({x}, {y}), Width: {w}, Height: {h}"
-    cv2.putText(frame, coordinates_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
-                 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-    
+    #cv2.putText(frame, coordinates_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
+    #             0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    print(f" This is coordinate of datetime: '{coordinates_text}'")
     
 
     # Convert the cropped region to RGB (EasyOCR expects RGB format)
@@ -43,7 +44,7 @@ def extract_datetime(frame):
     return datetime_text.strip()
   
 
-def process_frame(frame, ocr_type, recorded_license_plate):
+def process_frame(frame, ocr_type, recorded_license_plate, tracker):
   
     # Initialize variables
     tracking_started = False
@@ -104,11 +105,21 @@ def process_frame(frame, ocr_type, recorded_license_plate):
         box = boxes[i]
         x, y, w, h = box
         
+        # Ensure all coordinates are non-negative
+        x, y, w, h = max(0, x), max(0, y), max(0, w), max(0, h)
+        
         if tracking_started:
               # Update the tracker with the new bounding box
               success, bbox = tracker.update(frame)
               if success:
+                 # Start tracking with NEW bounding box (appears of new car for example)
                   x, y, w, h = [int(i) for i in bbox]
+                  print(f" Start tracking with the NEW bounding box with ROI Coordinates: x={x}, y={y}, width={w}, height={h}")
+                  # the tracker is re-initialized each time a successful update occurs. 
+                  # This might be suitable for scenarios where the tracked object undergoes 
+                  #significant changes or occlusion during the tracking, 
+                  #and re-initializing helps improve tracking accuracy.
+                  tracker.init(frame, (x, y, w, h))
                   tracked_object = (x, y, w, h)
                   cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
   
@@ -120,12 +131,17 @@ def process_frame(frame, ocr_type, recorded_license_plate):
                   tracking_started = False
                   tracked_object = None
         else:
-            # Start tracking
+           # Start tracking with OLD bounding box
+            print(f" Start tracking with OLD bounding box ROI Coordinates: x={x}, y={y}, width={w}, height={h}")
+            #initializing the tracker outside of the success condition means that the tracker 
+            #is only initialized once when tracking starts. Subsequent updates use the same 
+            #tracker without re-initializing it. This approach is suitable when you want to t
+            #rack a relatively stable object without frequent re-initializations.
             tracker.init(frame, (x, y, w, h))
             tracking_started = True
             tracked_object = (x, y, w, h)
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
-
+  
             # Crop the region of interest (ROI) for license plate recognition
             roi = frame[y:y + h, x:x + w]
 
@@ -220,54 +236,44 @@ def is_valid_license_plate(plate):
 
 def is_license_plate_recorded(plate, recorded_license_plates):
     return plate in recorded_license_plates
-  
-  
-# def skip_frames(cap, seconds_to_skip):
-#     start_time = time.time()
-# 
-#     while elapsed_time < seconds_to_skip:
-#         ret, _ = cap.read()
-#         if not ret:
-#             break
-#         elapsed_time = time.time() - start_time
         
 
 def process_video(video_path, ocr_type, tracker):
+  
     cap = cv2.VideoCapture(video_path)
+    
+    # Initialize object tracker (using MIL tracker)
     #tracker = cv2.TrackerMIL_create()
+    
     frame_count = 0
     recorded_license_plate = ""
-    
-    # Creates a new file
-    with open(os.path.splitext(os.path.basename(video_path))[0]+'_licenses.txt', 'w') as f:
+    # Create a new file
+    with open(os.path.splitext(os.path.basename(video_path))[0] + '_licenses.txt', 'w') as f:
         print("License  Datetime", file=f)
         pass
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
-      
         while True:
             ret, frame = cap.read()
-            if not ret:
+            if not ret or frame is None:
                 break
 
             frame_count += 1
 
             # Skip frames to speed up processing
             if frame_count % 50 != 0:
-                #print("skip_frame:", frame_count)
                 continue
 
             # Resize the frame to reduce processing time
-            #frame = cv2.resize(frame, (1200, 1000))
-            
+            # frame = cv2.resize(frame, (1200, 1000))
+
             # Submit the frame to the executor for parallel processing
-            future = executor.submit(process_frame, frame, ocr_type, recorded_license_plate)
+            future = executor.submit(process_frame, frame, ocr_type, recorded_license_plate, tracker)
 
             # Wait for the result and retrieve the processed frame and updated license plate
             processed_frame, recorded_license_plate = future.result()
 
             cv2.imshow("Frame", processed_frame)
-
 
             if cv2.waitKey(30) & 0xFF == ord('q'):
                 break
@@ -276,9 +282,30 @@ def process_video(video_path, ocr_type, tracker):
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
+  
+    # Start timer
+    start_time = time.time()
+    #video_path = "/media/kirus/BKP250/Camera/Cam16_sorted/20231115/motion/Cam16_20231115_motion_all.avi"
     video_path = "../video/2169_16_R_20231117070921_motion.avi"
-    ocr_type = 'easyocr'  # 'tesseract', 'easyocr', 'pyocr'
-    recorded_license_plates={}
-    # Initialize object tracker (using MIL tracker)
-    tracker = cv2.TrackerMIL_create()
-    process_video(video_path, ocr_type, tracker)
+    try:
+      f = open(video_path)
+    except FileNotFoundError:
+      print(f"Video Path: '{video_path}' does not exist!")
+      
+    else:
+         # exists 
+      ocr_type = 'easyocr'  # 'tesseract', 'easyocr', 'pyocr'
+      recorded_license_plates={}
+      
+      # Initialize object tracker (using MIL/KCF tracker)
+      tracker = cv2.TrackerMIL_create()
+      #tracker = cv2.TrackerKCF_create()
+      #tracker = cv2.TrackerCSRT_create()
+      #tracker = cv2.legacy.TrackerMOSSE_create()
+      
+      process_video(video_path, ocr_type, tracker)
+      # End timer
+      end_time = time.time()
+      # Calculate elapsed time
+      elapsed_time = end_time - start_time
+      print("Elapsed time: ", dt.strftime(dt.utcfromtimestamp(elapsed_time), '%Hh:%Mm:%Ss'))
