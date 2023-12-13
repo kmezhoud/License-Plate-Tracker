@@ -19,16 +19,15 @@ def extract_datetime(frame):
     x, y, w, h = 770, 33, 300, 40  # Example coordinates (adjust based on your video)
     crop_region = frame[y:y + h, x:x + w]
 
-    # Draw a square around the cropped region
-    cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 0), 2)
+    # Draw a square around the cropped region (BGR)
+    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 255), 2) #yellow
     
     # Display the coordinates of the cropped region
     coordinates_text = f"Coordinates: ({x}, {y}), Width: {w}, Height: {h}"
     #cv2.putText(frame, coordinates_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
     #             0.5, (255, 255, 255), 1, cv2.LINE_AA)
-    print(f" This is coordinate of datetime: '{coordinates_text}'")
+    #print(f" This is coordinate of datetime: '{coordinates_text}'")
     
-
     # Convert the cropped region to RGB (EasyOCR expects RGB format)
     crop_rgb = cv2.cvtColor(crop_region, cv2.COLOR_BGR2RGB)
     
@@ -37,11 +36,39 @@ def extract_datetime(frame):
     
     # Use EasyOCR to extract text from the cropped region
     results = reader.readtext(crop_rgb)
-    
+    # Check if there are any results
+    if results:
+        # Extract confidence score
+        #confidence = results[0][2]
+        # Check confidence threshold before printing
+        #if confidence > 0.95:
+                  # If there is only one result, extract datetime directly
+        if len(results) == 1:
+          # Extract text from the result
+            datetime_text = results[0][1]
+            datetime_text = datetime_text.replace(' ', '_')
+            confidence = results[0][2]
+        elif len(results) >= 2:
+            # If there are multiple results, concatenate date and time
+            date_text = results[0][1]
+            confidence = results[0][2]
+            time_text = results[1][1]
+            #confidence_time= results[1][2]
+            datetime_text = f"{date_text}_{time_text}"
+            
+        print(f"Detected text: '{datetime_text}' with confidence: {confidence}")
+        return datetime_text
+        #else:
+        #    print("Confidence below threshold. Ignoring text.")
+        #    return str(datetime_text+" D")
+    else:
+        print("No text detected.")
+        return "NA"
+        
     # Extract text from the result (assuming the first result is the most relevant)
-    datetime_text = results[0][1] if results else ""
-
-    return datetime_text.strip()
+    #datetime_text = str(results[0][1])+"__"+str(results[1][1]) if results else ""
+    #datetime_text = results[0][1] if results else ""
+    
   
 
 def process_frame(frame, ocr_type, recorded_license_plate, tracker):
@@ -106,7 +133,14 @@ def process_frame(frame, ocr_type, recorded_license_plate, tracker):
         x, y, w, h = box
         
         # Ensure all coordinates are non-negative
-        x, y, w, h = max(0, x), max(0, y), max(0, w), max(0, h)
+        #x, y, w, h = max(0, x), max(0, y), max(0, w), max(0, h)
+        # Adjust x and w to stay within the frame width
+        x = max(0, x)
+        w = min(frame.shape[1] - x, w)
+    
+        # Adjust y and h to stay within the frame height
+        y = max(0, y)
+        h = min(frame.shape[0] - y, h)
         
         if tracking_started:
               # Update the tracker with the new bounding box
@@ -114,7 +148,7 @@ def process_frame(frame, ocr_type, recorded_license_plate, tracker):
               if success:
                  # Start tracking with NEW bounding box (appears of new car for example)
                   x, y, w, h = [int(i) for i in bbox]
-                  print(f" Start tracking with the NEW bounding box with ROI Coordinates: x={x}, y={y}, width={w}, height={h}")
+                  #print(f" Start tracking with the NEW bounding box with ROI Coordinates: x={x}, y={y}, width={w}, height={h}")
                   # the tracker is re-initialized each time a successful update occurs. 
                   # This might be suitable for scenarios where the tracked object undergoes 
                   #significant changes or occlusion during the tracking, 
@@ -132,7 +166,7 @@ def process_frame(frame, ocr_type, recorded_license_plate, tracker):
                   tracked_object = None
         else:
            # Start tracking with OLD bounding box
-            print(f" Start tracking with OLD bounding box ROI Coordinates: x={x}, y={y}, width={w}, height={h}")
+            #print(f" Start tracking with OLD bounding box ROI Coordinates: x={x}, y={y}, width={w}, height={h}")
             #initializing the tracker outside of the success condition means that the tracker 
             #is only initialized once when tracking starts. Subsequent updates use the same 
             #tracker without re-initializing it. This approach is suitable when you want to t
@@ -141,10 +175,8 @@ def process_frame(frame, ocr_type, recorded_license_plate, tracker):
             tracking_started = True
             tracked_object = (x, y, w, h)
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
-  
             # Crop the region of interest (ROI) for license plate recognition
             roi = frame[y:y + h, x:x + w]
-
         # Use the selected OCR tool to extract text from the license plate
         if ocr_type == 'tesseract':
           # Convert the ROI to grayscale for better Tesseract OCR accuracy
@@ -173,13 +205,12 @@ def process_frame(frame, ocr_type, recorded_license_plate, tracker):
         # Find and replace Arabic characters using a more flexible pattern
         # Remove non-alphanumeric characters  تونس
         txt = re.sub(r"[^\d]", "_", txt) 
-        
         # if 'تونس' in txt:
         #     # If 'تونس' is already present, leave the text unchanged
         #     #txt = re.sub(r'[^\w\s]', 'تونس', txt) 
         #     print("tunis is in text")
         #     #pass
-        if confidence > 99.5:
+        if confidence > 98:
             if is_valid_license_plate(txt):
                 print(f"Detected license plate '{txt}' is valid.")
                 if is_license_plate_recorded(txt, recorded_license_plates):
@@ -205,7 +236,7 @@ def process_frame(frame, ocr_type, recorded_license_plate, tracker):
                   
                   ## Write license to file
                   with open(os.path.splitext(os.path.basename(video_path))[0]+'_licenses.txt',"a") as f: 
-                       print(txt+" "+datetime_info, file=f) 
+                       print(txt.strip("_")+" "+str(round(confidence,2))+" "+datetime_info, file=f) 
             else:
                 print(f"Detected license plate '{txt}' is not valid.")
         
@@ -217,14 +248,14 @@ def process_frame(frame, ocr_type, recorded_license_plate, tracker):
 
         # Draw the license plate text on the frame
         cv2.putText(frame, text_to_display, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
+        
     return frame, recorded_license_plate
 
 
 # List of regex patterns for license plate formats
 license_plate_patterns = [
     r'_*\d{1,3}_+\d{1,4}_*',        # Tunisian format  r'\d{1,3}\sتونس\s\d{1,4}'
-    r'_*\d{5,6}_+[آ-ي]{2}_*',       # Alternative format
+    r'_*\d{5,6}_+[آ-ي]{2}_*',       # Alternative format RS
     # Add more patterns as needed
 ]
 
@@ -242,16 +273,13 @@ def process_video(video_path, ocr_type, tracker):
   
     cap = cv2.VideoCapture(video_path)
     
-    # Initialize object tracker (using MIL tracker)
-    #tracker = cv2.TrackerMIL_create()
+        # Create a new file
+    with open(os.path.splitext(os.path.basename(video_path))[0] + '_licenses.txt', 'w') as f:
+        print("License" " "  "Confidence" " " "Datetime", file=f)
+        pass
     
     frame_count = 0
     recorded_license_plate = ""
-    # Create a new file
-    with open(os.path.splitext(os.path.basename(video_path))[0] + '_licenses.txt', 'w') as f:
-        print("License  Datetime", file=f)
-        pass
-
     with concurrent.futures.ThreadPoolExecutor() as executor:
         while True:
             ret, frame = cap.read()
@@ -261,7 +289,7 @@ def process_video(video_path, ocr_type, tracker):
             frame_count += 1
 
             # Skip frames to speed up processing
-            if frame_count % 50 != 0:
+            if frame_count % 10 != 0:
                 continue
 
             # Resize the frame to reduce processing time
@@ -286,7 +314,7 @@ if __name__ == "__main__":
     # Start timer
     start_time = time.time()
     #video_path = "/media/kirus/BKP250/Camera/Cam16_sorted/20231115/motion/Cam16_20231115_motion_all.avi"
-    video_path = "../video/2169_16_R_20231117070921_motion.avi"
+    video_path = "../video/363_16_M_20231109075158.mp4"
     try:
       f = open(video_path)
     except FileNotFoundError:
