@@ -289,7 +289,7 @@ def process_video(video_path, ocr_type, tracker):
             frame_count += 1
 
             # Skip frames to speed up processing
-            if frame_count % 10 != 0:
+            if frame_count % 30 != 0:
                 continue
 
             # Resize the frame to reduce processing time
@@ -314,7 +314,7 @@ if __name__ == "__main__":
     # Start timer
     start_time = time.time()
     #video_path = "/media/kirus/BKP250/Camera/Cam16_sorted/20231115/motion/Cam16_20231115_motion_all.avi"
-    video_path = "../video/363_16_M_20231109075158.mp4"
+    video_path = "../video/video1.avi"
     try:
       f = open(video_path)
     except FileNotFoundError:
