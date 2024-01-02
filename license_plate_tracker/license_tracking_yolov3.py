@@ -77,7 +77,7 @@ def process_frame(frame, ocr_type, recorded_license_plate, tracker):
     tracking_started = False
     tracked_object = None
 
-    # Load Tiny YOLO
+    # Load Tiny YOLOv3
     net = cv2.dnn.readNet("yolo/yolov3.cfg", "yolo/yolov3.weights")
     classes = []
     with open("yolo/coco.names", "r") as f:
